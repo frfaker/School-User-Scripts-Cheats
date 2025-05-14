@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      0.1
 // @description  Allows pasting on mrs cayce's bum ass online check
-// @author       Mear
+// @author       frfaker
 // @match        *://*.mhedu.com/*
 // @grant        none
 // ==/UserScript==
