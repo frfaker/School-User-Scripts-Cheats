@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odysseyware Helper
 // @namespace    http://tampermonkey.net/
-// @version      7.0
+// @version      7.3
 // @match        https://robco.owschools.com/owsoo/*
 // @grant        none
 // ==/UserScript==
@@ -333,7 +333,7 @@
             const promptEl = prob.querySelector('[data-type="prompt"]');
             const prompt = promptEl
                 ? promptEl.innerText.trim().replace(/\s+/g, ' ')
-                : (prob.querySelector('.problemBody')?.innerText?.trim().replace(/\s+/g, ' ').substring(0, 400) || '');
+                : (prob.querySelector('.problemBody')?.innerText?.trim().replace(/\s+/g, ' ').substring(0, 500) || '');
             const obj = { id: qid, type: rawType, prompt };
 
             if(rawType === 'MultipleChoice') {
@@ -341,23 +341,22 @@
                 prob.querySelectorAll('.option-choice').forEach(opt => {
                     const radio = opt.querySelector('input[type="radio"]');
                     const label = opt.querySelector('label');
-                    if(radio && label) obj.options.push({ id: radio.id, text: label.innerText.trim().replace(/\s+/g, ' ') });
+                    if(radio && label) obj.options.push({
+                        id: radio.id,
+                        text: label.innerText.trim().replace(/\s+/g, ' ')
+                    });
                 });
             } else if(rawType === 'TextMultipleChoice') {
                 obj.selects = [];
                 obj.fullContext = prob.querySelector('.problemBody')?.innerText?.trim().replace(/\s+/g, ' ') || '';
                 prob.querySelectorAll('select[id*="TextMultipleChoice"]').forEach(sel => {
                     const opts = [];
-                    sel.querySelectorAll('option').forEach(o => { if(o.value) opts.push({ value: o.value, text: o.innerText.trim() }); });
+                    sel.querySelectorAll('option').forEach(o => {
+                        if(o.value) opts.push({ value: o.value, text: o.innerText.trim() });
+                    });
                     obj.selects.push({ id: sel.id, options: opts });
                 });
-            } else if(rawType === 'FillInTheBlank' || rawType === 'ShortAnswer' || rawType === 'TextEntry') {
-                obj.inputs = [];
-                prob.querySelectorAll('input[type="text"], input[type="number"], input:not([type="radio"]):not([type="checkbox"])').forEach(inp => {
-                    obj.inputs.push({ id: inp.id, name: inp.name, placeholder: inp.placeholder || '' });
-                });
-                obj.fullContext = prob.querySelector('.problemBody')?.innerText?.trim().replace(/\s+/g, ' ') || '';
-            } else if(rawType === 'CheckboxMultipleChoice' || rawType === 'Checkbox') {
+            } else if(rawType === 'CheckboxMultipleChoice' || rawType === 'Checkbox' || rawType === 'MultipleSelect') {
                 obj.options = [];
                 prob.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                     const label = prob.querySelector(`label[for="${cb.id}"]`);
@@ -369,10 +368,12 @@
                 prob.querySelectorAll('input[name^="Matching."]').forEach(inp => {
                     obj.inputs.push({ id: inp.id, name: inp.name });
                 });
+                obj.selects = [];
                 prob.querySelectorAll('select').forEach(sel => {
                     const opts = [];
-                    sel.querySelectorAll('option').forEach(o => { if(o.value) opts.push({ value: o.value, text: o.innerText.trim() }); });
-                    if(!obj.selects) obj.selects = [];
+                    sel.querySelectorAll('option').forEach(o => {
+                        if(o.value) opts.push({ value: o.value, text: o.innerText.trim() });
+                    });
                     obj.selects.push({ id: sel.id, name: sel.name, options: opts });
                 });
             } else if(rawType === 'Paragraph' || rawType === 'Essay') {
@@ -391,59 +392,96 @@
         return result;
     }
 
-    function clickNextQuestion() {
-        const nextBtn = document.querySelector('.submitAnswerButton');
-        if(nextBtn) {
-            nextBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-        }
+    function waitForQuestionVisible(qid, timeout) {
+        return new Promise(resolve => {
+            const check = () => {
+                const el = document.getElementById(`problemMain_${qid}`);
+                if(el && el.style.display !== 'none' && el.offsetParent !== null) {
+                    resolve(true);
+                    return true;
+                }
+                return false;
+            };
+            if(check()) return;
+            let elapsed = 0;
+            const interval = setInterval(() => {
+                if(check()) { clearInterval(interval); return; }
+                elapsed += 50;
+                if(elapsed >= timeout) { clearInterval(interval); resolve(false); }
+            }, 50);
+        });
     }
 
     function navigateToQuestion(qid) {
         const navBtn = document.getElementById(`button_problemMain_${qid}`);
-        if(navBtn) {
-            navBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        if(navBtn) navBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+
+    function clickNextQuestion() {
+        const nextBtn = document.querySelector('.submitAnswerButton');
+        if(nextBtn) {
+            nextBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            nextBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            nextBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
         }
+    }
+
+    function dismissAnyDialog() {
+        const noBtn = document.querySelector('#turnItIn .noButton, #verify .noButton');
+        if(noBtn && noBtn.offsetParent !== null) {
+            noBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            return true;
+        }
+        return false;
     }
 
     function pick(id) {
         const el = document.getElementById(id);
-        if(!el){ console.warn("Missing radio:", id); return; }
+        if(!el){ console.warn("Missing radio:", id); return false; }
         el.checked = true;
         ["mousedown","click","change","input","blur"].forEach(ev =>
             el.dispatchEvent(new Event(ev, { bubbles: true })));
+        return true;
     }
 
     function setSelect(id, value) {
         const el = document.getElementById(id);
-        if(!el){ console.warn("Missing select:", id); return; }
+        if(!el){ console.warn("Missing select:", id); return false; }
         el.value = value;
         try { submitAnswer(id); } catch(e) {}
         ["change","input"].forEach(ev =>
             el.dispatchEvent(new Event(ev, { bubbles: true })));
+        return true;
     }
 
     function checkBox(id) {
         const el = document.getElementById(id);
-        if(!el){ console.warn("Missing checkbox:", id); return; }
+        if(!el){ console.warn("Missing checkbox:", id); return false; }
         el.checked = true;
         ["change","input"].forEach(ev =>
             el.dispatchEvent(new Event(ev, { bubbles: true })));
+        return true;
     }
 
     function setInput(id, value) {
-        const el = document.getElementById(id) || document.querySelector(`input[name="${id}"]`);
-        if(!el){ console.warn("Missing input:", id); return; }
+        let el = document.getElementById(id);
+        if(!el) el = document.querySelector(`input[name="${id}"]`);
+        if(!el){ console.warn("Missing input:", id); return false; }
         el.value = value;
+        el.focus();
         ["input","change","blur","keyup"].forEach(ev =>
             el.dispatchEvent(new Event(ev, { bubbles: true })));
+        return true;
     }
 
     function setMatchingInput(name, value) {
-        const el = document.querySelector(`input[name="Matching.${name}"]`) || document.querySelector(`input[name="${name}"]`);
-        if(!el){ console.warn("Missing matching input:", name); return; }
+        let el = document.querySelector(`input[name="Matching.${name}"]`);
+        if(!el) el = document.querySelector(`input[name="${name}"]`);
+        if(!el){ console.warn("Missing matching input:", name); return false; }
         el.value = value;
         ["input","change","blur"].forEach(ev =>
             el.dispatchEvent(new Event(ev, { bubbles: true })));
+        return true;
     }
 
     async function runFromJSON(json) {
@@ -452,53 +490,100 @@
 
         for(let i = 0; i < entries.length; i++) {
             const [qid, q] = entries[i];
-            if(q.type === 'skip' || !q.answer) {
-                continue;
-            }
+
+            if(q.type === 'skip' || !q.answer) continue;
 
             navigateToQuestion(qid);
-            await sleep(300);
+            await sleep(400);
+            await waitForQuestionVisible(qid, 2000);
+            await sleep(200);
+
+            dismissAnyDialog();
+            await sleep(100);
+
+            let answered = false;
 
             if(q.type === 'radio') {
-                pick(q.answer);
-                await sleep(150);
+                answered = pick(q.answer);
+                await sleep(200);
+
             } else if(q.type === 'select') {
-                const selId = document.querySelector(`select[id^="tc1_${qid}"]`)?.id
-                    || document.querySelector(`select[id*="${qid}_TextMultipleChoice"]`)?.id
-                    || document.querySelector(`select[id*="${qid}"]`)?.id;
-                if(selId) { setSelect(selId, q.answer); await sleep(200); }
-                else { console.warn("Could not find select for", qid); }
-            } else if(q.type === 'select_multi') {
-                for(const [key, val] of Object.entries(q.answer)) {
-                    const selId = `${key}_${qid}_TextMultipleChoice`;
-                    setSelect(selId, val);
-                    await sleep(200);
+                const prob = document.getElementById(`problemMain_${qid}`);
+                let selId = null;
+                if(prob) {
+                    const sel = prob.querySelector('select[id*="TextMultipleChoice"]');
+                    if(sel) selId = sel.id;
                 }
+                if(!selId) {
+                    selId = document.querySelector(`select[id^="tc1_${qid}"]`)?.id
+                        || document.querySelector(`select[id*="${qid}_TextMultipleChoice"]`)?.id
+                        || document.querySelector(`select[id*="${qid}"]`)?.id;
+                }
+                if(selId) {
+                    answered = setSelect(selId, q.answer);
+                    await sleep(250);
+                } else {
+                    console.warn("Could not find select for question", qid);
+                }
+
+            } else if(q.type === 'select_multi') {
+                const prob = document.getElementById(`problemMain_${qid}`);
+                const selects = prob ? prob.querySelectorAll('select[id*="TextMultipleChoice"]') : [];
+                if(selects.length > 0) {
+                    for(const [key, val] of Object.entries(q.answer)) {
+                        const selId = `${key}_${qid}_TextMultipleChoice`;
+                        setSelect(selId, val);
+                        await sleep(200);
+                    }
+                    answered = true;
+                } else {
+                    console.warn("Could not find selects for question", qid);
+                }
+
             } else if(q.type === 'checkbox') {
                 const ids = Array.isArray(q.answer) ? q.answer : [q.answer];
-                for(const cbid of ids) { checkBox(cbid); await sleep(100); }
-                await sleep(100);
+                for(const cbid of ids) {
+                    checkBox(cbid);
+                    await sleep(100);
+                }
+                answered = ids.length > 0;
+                await sleep(150);
+
             } else if(q.type === 'input') {
-                const val = typeof q.answer === 'object' ? q.answer : { [Object.keys(q.answer||{})[0]]: q.answer };
                 if(typeof q.answer === 'string' || typeof q.answer === 'number') {
-                    const inp = document.querySelector(`#problemMain_${qid} input[type="text"], #problemMain_${qid} input[type="number"], #problemMain_${qid} input:not([type="radio"]):not([type="checkbox"])`);
-                    if(inp) { setInput(inp.id || inp.name, String(q.answer)); await sleep(150); }
-                } else {
+                    const prob = document.getElementById(`problemMain_${qid}`);
+                    const inp = prob ? prob.querySelector(
+                        'input[type="text"], input[type="number"], input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'
+                    ) : null;
+                    if(inp) {
+                        answered = setInput(inp.id || inp.name, String(q.answer));
+                        await sleep(150);
+                    }
+                } else if(typeof q.answer === 'object') {
                     for(const [inputId, inputVal] of Object.entries(q.answer)) {
                         setInput(inputId, String(inputVal));
                         await sleep(150);
                     }
+                    answered = true;
                 }
+
             } else if(q.type === 'matching') {
                 for(const [name, val] of Object.entries(q.answer)) {
                     setMatchingInput(name, val);
                     await sleep(150);
                 }
+                answered = true;
             }
 
-            await sleep(200);
-            clickNextQuestion();
-            await sleep(600);
+            if(answered) {
+                await sleep(300);
+                dismissAnyDialog();
+                await sleep(100);
+                clickNextQuestion();
+                await sleep(700);
+                dismissAnyDialog();
+                await sleep(200);
+            }
         }
 
         console.log("Done ✓");
@@ -518,12 +603,14 @@ FillInTheBlank / ShortAnswer / text input → type "input", answer is either a s
 Matching → type "matching", answer is an object {"matchingName":"value"} where matchingName is the name attribute after "Matching."
 CheckboxMultipleChoice → type "checkbox", answer is array of element IDs for all correct options
 Paragraph / Essay → type "skip", answer is null
+MultipleSelect (checkboxes, select all that apply) → type "checkbox", answer is array of element IDs for ALL correct options
 
-Important notes:
-- For select values, use the EXACT value attribute from the options array, including URL encoding like %2B2 for +2
-- coefficient of 1 in balancing equations uses value "blank"
-- Work out all chemistry, math, and balancing yourself before answering
-- Every question must have an entry, even skipped ones
+Important:
+- For select values use the EXACT value attribute from the options array including URL encoding like %2B2 for +2
+- Coefficient of 1 in balancing equations uses value "blank"
+- Work out all chemistry math and balancing yourself before answering
+- Every single question must have an entry in the JSON even skipped ones
+- Do not guess — derive the correct answer from the question text and options provided
 
 Here is the question data:`;
 
@@ -540,6 +627,7 @@ FillInTheBlank / text input → type "input", answer is a string for single inpu
 Matching → type "matching", answer is {"matchingName":"value"}
 CheckboxMultipleChoice → type "checkbox", answer is array of element IDs
 Paragraph / Essay → type "skip", answer is null
+MultipleSelect (checkboxes, select all that apply) → type "checkbox", answer is array of element IDs for ALL correct options
 
 Use the EXACT value attribute strings from the options. URL encoded values: +1="%2B1", +2="%2B2", +3="%2B3", -1="-1", -2="-2", coefficient of 1="blank". Work out all chemistry and math yourself. Every question must have an entry.
 
@@ -550,7 +638,7 @@ Here is the question data:`;
     panel.innerHTML = `
         <div id="ow-panel-scanline"></div>
         <div id="ow-panel-header">
-            <div id="ow-panel-title">⚡ OW Helper v7.0</div>
+            <div id="ow-panel-title">⚡ OW Helper v7.3</div>
             <button id="ow-panel-close">✕</button>
         </div>
         <div id="ow-tab-bar">
@@ -568,10 +656,13 @@ Here is the question data:`;
                 <div class="ow-section-label">ChatGPT (chat.openai.com)</div>
                 <div class="ow-prompt-box" id="chatgpt-prompt-preview"></div>
                 <button class="ow-copy-prompt-btn" data-prompt="chatgpt">📋 Copy ChatGPT Prompt</button>
+                <div style="margin-top:8px; padding:8px 10px; border-radius:6px; background:rgba(255,60,0,0.08); border:1px solid rgba(255,100,0,0.35); font-size:10px; color:#ffaa55; letter-spacing:0.5px; line-height:1.6;">
+                   ⚠️ <b style="color:#ffcc77;">ChatGPT Warning:</b> You must be in <b style="color:#ffcc77;">Developer Mode</b> and have <b style="color:#ffcc77;">Instant Answering</b> enabled for this to work correctly.
+                </div>
                 <div class="ow-tip-box" style="margin-top:14px;">
-                    <b>💡 Workflow:</b> Click <b>📊 Copy Questions</b> → paste the AI prompt into a new chat → paste the question JSON right after it → send. The AI returns a JSON answer map. Copy it and hit <b>▶ Answer</b>.<br><br>
+                    <b>💡 Workflow:</b> Click <b>📊 Copy Questions</b> → paste the AI prompt into a new chat → paste the question JSON right after it → send. Copy the returned JSON and hit <b>▶ Answer</b>.<br><br>
                     <b>💡 Size:</b> Question JSON is ~2-5% the size of full HTML. Much faster and far fewer tokens.<br><br>
-                    <b>💡 All types covered:</b> Radio, dropdowns, text inputs, matching, checkboxes — all handled automatically.
+                    <b>💡 All types covered:</b> Radio, dropdowns, text inputs, matching, checkboxes — all handled automatically including Next Question confirmation per answer.
                 </div>
             </div>
 
@@ -583,7 +674,7 @@ Here is the question data:`;
                 </div>
                 <div class="ow-how-step">
                     <div class="ow-step-num">2</div>
-                    <div class="ow-step-text">Click <b>📊 Copy Questions</b>. This scrapes every question's ID, type, prompt, and all answer option IDs and values — tiny and clean.</div>
+                    <div class="ow-step-text">Click <b>📊 Copy Questions</b>. This scrapes every question's ID, type, prompt, and all answer option IDs and values.</div>
                 </div>
                 <div class="ow-how-step">
                     <div class="ow-step-num">3</div>
@@ -599,15 +690,15 @@ Here is the question data:`;
                 </div>
                 <div class="ow-how-step">
                     <div class="ow-step-num">6</div>
-                    <div class="ow-step-text">Back on Odysseyware, click <b>▶ Answer</b>. It navigates to each question, fills the answer, and clicks Next Question to confirm each one automatically.</div>
+                    <div class="ow-step-text">Back on Odysseyware, click <b>▶ Answer</b>. It navigates to each question, fills the answer, waits for it to register, then clicks <b>Next Question</b> to confirm — just like a real student would.</div>
                 </div>
                 <div class="ow-how-step">
                     <div class="ow-step-num">7</div>
-                    <div class="ow-step-text">If anything looks wrong, click <b>⚡ Emergency Verify</b> to re-fire all answer events on every filled question.</div>
+                    <div class="ow-step-text">If anything looks wrong, click <b>⚡ Emergency Verify</b> to re-fire all answer events.</div>
                 </div>
                 <div class="ow-divider"></div>
                 <div class="ow-section-label">Button Guide</div>
-                <div class="ow-hotkey-row"><span class="ow-hotkey-name">▶ Answer</span><span class="ow-hotkey-badge badge-purple">Fills answers + clicks Next Question per answer</span></div>
+                <div class="ow-hotkey-row"><span class="ow-hotkey-name">▶ Answer</span><span class="ow-hotkey-badge badge-purple">Fills + confirms each answer via Next Question</span></div>
                 <div class="ow-hotkey-row"><span class="ow-hotkey-name">📊 Copy Questions</span><span class="ow-hotkey-badge badge-orange">Scrapes all question data</span></div>
                 <div class="ow-hotkey-row"><span class="ow-hotkey-name">📋 Copy HTML</span><span class="ow-hotkey-badge badge-green">Full page HTML fallback</span></div>
                 <div class="ow-hotkey-row"><span class="ow-hotkey-name">⚡ Emergency Verify</span><span class="ow-hotkey-badge badge-red">Re-fires all answer events</span></div>
@@ -634,7 +725,7 @@ Here is the question data:`;
                 <div class="ow-cheat-row"><span class="ow-cheat-key">radio</span><span class="ow-cheat-val">MultipleChoice → full element ID</span></div>
                 <div class="ow-cheat-row"><span class="ow-cheat-key">select</span><span class="ow-cheat-val">Single dropdown → value string</span></div>
                 <div class="ow-cheat-row"><span class="ow-cheat-key">select_multi</span><span class="ow-cheat-val">Multi dropdown → {"tc1":"v1","tc2":"v2"}</span></div>
-                <div class="ow-cheat-row"><span class="ow-cheat-key">input</span><span class="ow-cheat-val">Text/number field → string or {"id":"val"}</span></div>
+                <div class="ow-cheat-row"><span class="ow-cheat-key">input</span><span class="ow-cheat-val">Text/number → string or {"id":"val"}</span></div>
                 <div class="ow-cheat-row"><span class="ow-cheat-key">matching</span><span class="ow-cheat-val">Matching → {"name":"value"}</span></div>
                 <div class="ow-cheat-row"><span class="ow-cheat-key">checkbox</span><span class="ow-cheat-val">Checkboxes → ["id1","id2"]</span></div>
                 <div class="ow-cheat-row"><span class="ow-cheat-key">skip</span><span class="ow-cheat-val">Essay/Graphic → null</span></div>
@@ -711,7 +802,7 @@ Here is the question data:`;
                     runFromJSON(json);
                     answerBtn.innerHTML = '<span class="scanline"></span>⏳ Running...';
                     showToast('⚡ Executing answers', '#aa00ff');
-                    setTimeout(() => { answerBtn.innerHTML = '<span class="scanline"></span>▶ Answer'; }, 5000);
+                    setTimeout(() => { answerBtn.innerHTML = '<span class="scanline"></span>▶ Answer'; }, 8000);
                 } catch(e) {
                     showToast('❌ Invalid JSON', '#ff003c');
                     console.error('JSON parse error:', e);
