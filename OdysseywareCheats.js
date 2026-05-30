@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odysseyware Helper
 // @namespace    http://tampermonkey.net/
-// @version      7.3
+// @version      7.4
 // @match        https://robco.owschools.com/owsoo/*
 // @grant        none
 // ==/UserScript==
@@ -638,7 +638,7 @@ Here is the question data:`;
     panel.innerHTML = `
         <div id="ow-panel-scanline"></div>
         <div id="ow-panel-header">
-            <div id="ow-panel-title">⚡ OW Helper v7.3</div>
+            <div id="ow-panel-title">⚡ OW Helper v7.4</div>
             <button id="ow-panel-close">✕</button>
         </div>
         <div id="ow-tab-bar">
