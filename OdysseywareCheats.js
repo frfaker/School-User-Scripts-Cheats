@@ -590,7 +590,7 @@
         showToast('✅ All answers submitted', '#aa00ff');
     }
 
-    const CLAUDE_PROMPT = `You are helping autofill an Odysseyware chemistry assignment. I will give you a JSON array of question objects scraped directly from the page DOM. Each object contains the question ID, type, prompt text, and all available answer options with their exact element IDs and values.
+    const CLAUDE_PROMPT = `You are helping autofill an Odysseyware assignment. I will give you a JSON array of question objects scraped directly from the page DOM. Each object contains the question ID, type, prompt text, and all available answer options with their exact element IDs and values.
 
 Respond with ONLY a raw JSON object. No explanation, no markdown, no code blocks. Just raw JSON starting with { and ending with }.
 
@@ -614,7 +614,7 @@ Important:
 
 Here is the question data:`;
 
-    const CHATGPT_PROMPT = `You are helping autofill an Odysseyware chemistry assignment. I will give you a JSON array of question objects scraped directly from the page DOM. Each object contains the question ID, type, prompt text, and all available answer options with their exact element IDs and values.
+    const CHATGPT_PROMPT = `You are helping autofill an Odysseyware assignment. I will give you a JSON array of question objects scraped directly from the page DOM. Each object contains the question ID, type, prompt text, and all available answer options with their exact element IDs and values.
 
 Respond with ONLY a raw JSON object. No explanation, no markdown, no code blocks. Just raw JSON starting with { and ending with }.
 
